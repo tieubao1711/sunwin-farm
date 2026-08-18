@@ -4,6 +4,7 @@ web/dist/
 .env
 .env.local
 *.log
+logs/
 .DS_Store
 Thumbs.db
 .vscode/

@@ -1,5 +1,6 @@
 require('dotenv').config()
 
+const path = require('path');
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
@@ -248,6 +249,16 @@ app.use((err, _req, res, next) => {
   res.status(500).json({
     success: false,
     message: err.message || 'Server error'
+  });
+});
+
+const distDir = path.join(__dirname, '../web/dist');
+app.use(express.static(distDir));
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+  res.sendFile(path.join(distDir, 'index.html'), (err) => {
+    if (err) next();
   });
 });
 
