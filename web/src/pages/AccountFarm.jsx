@@ -277,6 +277,7 @@ export function AccountFarm() {
       if (verified.length > 0) {
         await patchAccount(account.id, {
           status: 'bank_verified',
+          usageStatus: 'unused',
           verifiedBankAccounts: verified,
           verifiedAccountHolder: holders,
           lastCheckAt: Date.now(),
@@ -387,7 +388,8 @@ export function AccountFarm() {
       const result = await createAccountsFromBankHolder({
         accountHolder: group.accountHolder,
         bankId: group.bankId,
-        password: holderPassword
+        password: holderPassword,
+        allowReuse: true
       })
       const skipped = result.skipped?.length || 0
       applyBatchSelection({
@@ -396,7 +398,7 @@ export function AccountFarm() {
         accountHolder: group.accountHolder
       })
       setProgress({
-        label: `Đã tạo ${result.created} account${skipped ? ` · ${skipped} lỗi/trùng` : ''}`
+        label: `Đã tạo ${result.created} account${result.reuseMode ? ' · dùng lại STK đã có' : ''}${skipped ? ` · ${skipped} lỗi/trùng` : ''}`
       })
       const groups = await fetchBankSelectGroups()
       setBankGroups(groups)
@@ -515,6 +517,7 @@ export function AccountFarm() {
 
     await patchAccount(account.id, {
       status: 'bank_pending',
+      usageStatus: 'unused',
       lastError: ''
     })
   }
@@ -747,7 +750,9 @@ export function AccountFarm() {
                       value={`${group.bankId}|${group.accountHolder}`}
                     >
                       {formatBankHolderLabel(group.bankName, group.bankId, group.accountHolder)}
-                      {' · '}{group.stkCount} STK
+                      {' · '}tổng {group.stkCount} STK
+                      {group.freeCount ? ` · trống ${group.freeCount}` : ''}
+                      {group.usedCount ? ` · đã dùng ${group.usedCount}` : ''}
                     </option>
                   ))}
                 </select>
@@ -764,7 +769,12 @@ export function AccountFarm() {
           )}
           {(selectedGroup || effectiveBatch) && (
             <div className="step-alert ok">
-              Sẽ tạo <strong>{selectedGroup?.stkCount ?? '…'}</strong> account (mỗi STK một acc)
+              Sẽ tạo <strong>{selectedGroup?.freeCount || selectedGroup?.stkCount || '…'}</strong> account
+              {selectedGroup?.freeCount === 0 && selectedGroup?.stkCount ? (
+                <> bằng cách <strong>dùng lại STK đã có</strong></>
+              ) : (
+                <> (mỗi STK một acc)</>
+              )}
               {effectiveBatch && !selectedGroup && batchAccounts.length > 0 && (
                 <> · batch hiện có <strong>{batchAccounts.length}</strong> acc</>
               )}

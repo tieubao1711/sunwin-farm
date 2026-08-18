@@ -284,6 +284,7 @@ router.post('/accounts/from-bank-holder', async (req, res) => {
     const employee = getEmployee(req)
     const holder = (req.body.accountHolder || '').trim()
     const bankId = (req.body.bankId || '').trim()
+    const allowReuse = req.body.allowReuse !== false
     const settingsDoc = await getSettings()
     const password = req.body.password || settingsDoc.defaultPassword || 'abc123'
 
@@ -301,9 +302,20 @@ router.post('/accounts/from-bank-holder', async (req, res) => {
     }
     if (bankId) bankFilter.bankId = bankId
 
-    const banks = await BankRecord.find(bankFilter).sort({ accountNo: 1 })
+    let banks = await BankRecord.find(bankFilter).sort({ accountNo: 1 })
+    let reuseMode = false
+
+    if (banks.length === 0 && allowReuse) {
+      const reuseFilter = {
+        accountHolder: new RegExp(`^${holder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+      }
+      if (bankId) reuseFilter.bankId = bankId
+      banks = await BankRecord.find(reuseFilter).sort({ accountNo: 1 })
+      reuseMode = banks.length > 0
+    }
+
     if (banks.length === 0) {
-      return res.status(400).json({ success: false, message: 'Không còn STK trống cho chủ khoản này' })
+      return res.status(400).json({ success: false, message: 'Không có STK nào cho chủ khoản này' })
     }
 
     const existingUsernames = new Set(
@@ -332,15 +344,17 @@ router.post('/accounts/from-bank-holder', async (req, res) => {
           updatedBy: employee
         })
 
-        await BankRecord.findByIdAndUpdate(bank._id, {
-          usageStatus: 'reserved',
-          reservedBy: employee,
-          reservedAt: new Date(),
-          gameAccountId: doc._id,
-          username: doc.username,
-          password,
-          updatedBy: employee
-        })
+        if (!reuseMode) {
+          await BankRecord.findByIdAndUpdate(bank._id, {
+            usageStatus: 'reserved',
+            reservedBy: employee,
+            reservedAt: new Date(),
+            gameAccountId: doc._id,
+            username: doc.username,
+            password,
+            updatedBy: employee
+          })
+        }
 
         created.push(mapAccount(doc))
       } catch (err) {
@@ -353,12 +367,12 @@ router.post('/accounts/from-bank-holder', async (req, res) => {
       'create_from_bank',
       'account',
       '',
-      `${created.length} acc từ ${holder}`
+      `${created.length} acc từ ${holder}${reuseMode ? ' (reuse STK)' : ''}`
     )
 
     res.json({
       success: true,
-      data: { created: created.length, skipped, accounts: created }
+      data: { created: created.length, skipped, accounts: created, reuseMode }
     })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })
@@ -540,13 +554,7 @@ router.post('/accounts/import-sheet', async (req, res) => {
 router.get('/banks/select-groups', async (req, res) => {
   try {
     const employee = getEmployee(req)
-    const docs = await BankRecord.find({
-      gameAccountId: null,
-      $or: [
-        { usageStatus: 'available' },
-        { usageStatus: 'reserved', reservedBy: employee }
-      ]
-    }).sort({ bankName: 1, accountHolder: 1, accountNo: 1 })
+    const docs = await BankRecord.find({}).sort({ bankName: 1, accountHolder: 1, accountNo: 1 })
 
     const map = new Map()
     for (const doc of docs) {
@@ -556,10 +564,21 @@ router.get('/banks/select-groups', async (req, res) => {
           bankId: doc.bankId,
           bankName: doc.bankName,
           accountHolder: doc.accountHolder,
-          stkCount: 0
+          stkCount: 0,
+          freeCount: 0,
+          usedCount: 0
         })
       }
-      map.get(key).stkCount += 1
+      const group = map.get(key)
+      group.stkCount += 1
+      if (
+        !doc.gameAccountId &&
+        (doc.usageStatus === 'available' || (doc.usageStatus === 'reserved' && doc.reservedBy === employee))
+      ) {
+        group.freeCount += 1
+      } else {
+        group.usedCount += 1
+      }
     }
 
     res.json({ success: true, data: [...map.values()] })
