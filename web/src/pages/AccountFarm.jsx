@@ -13,7 +13,6 @@ import { parseCodePayPayload } from '../utils/codePay'
 import { extractWalletFromResult } from '../utils/wallet'
 import { accountHasBank } from '../farm/bankImport'
 import { useFarm } from '../farm/FarmProvider'
-import { POLL_INTERVAL_MS } from '../farm/constants'
 import {
   buildDisplayName,
   getProxyById,
@@ -116,7 +115,6 @@ export function AccountFarm() {
     stats,
     loading,
     error,
-    setSettings,
     patchAccount,
     deleteAccount,
     refresh,
@@ -354,23 +352,6 @@ export function AccountFarm() {
       return false
     }
   }, [patchAccount])
-
-  useEffect(() => {
-    if (!state.settings.autoCheckBank) return undefined
-
-    const tick = async () => {
-      const pending = stateRef.current.accounts.filter((a) => a.status === 'bank_pending')
-      if (pending.length === 0) return
-      for (const account of pending) {
-        await checkBankForAccount(account)
-      }
-      setLastPollAt(Date.now())
-    }
-
-    tick()
-    const timer = setInterval(tick, POLL_INTERVAL_MS)
-    return () => clearInterval(timer)
-  }, [state.settings.autoCheckBank, checkBankForAccount])
 
   const recreateTargets = useMemo(() => {
     const pool = selected.size > 0
@@ -943,23 +924,17 @@ export function AccountFarm() {
       return (
         <>
           <h3>Kiểm tra verify</h3>
-          <p className="step-desc">Theo dõi bank duyệt (30s). Lỗi check chỉ ghi lastError, không xóa acc.</p>
-          <label className="toggle-card">
-            <input
-              type="checkbox"
-              checked={state.settings.autoCheckBank}
-              onChange={(e) => setSettings({ autoCheckBank: e.target.checked })}
-            />
-            <span>
-              <strong>Tự kiểm tra mỗi 30 giây</strong>
-              <small>{stats.bankPending} đang chờ</small>
-            </span>
-          </label>
+          <p className="step-desc">Bấm kiểm tra thủ công. Lỗi check chỉ ghi lastError, không xóa acc.</p>
           {lastPollAt && (
             <p className="step-meta">Lần cuối: {new Date(lastPollAt).toLocaleTimeString('vi-VN')}</p>
           )}
-          <button type="button" className="btn block" disabled={running || stats.bankPending === 0} onClick={handleManualCheckAll}>
-            Kiểm tra ngay
+          <button
+            type="button"
+            className="btn primary block"
+            disabled={running || batchStats.bankPending === 0}
+            onClick={handleManualCheckAll}
+          >
+            {running ? 'Đang kiểm tra...' : `Kiểm tra ngay (${batchStats.bankPending})`}
           </button>
           {batchAccounts.some(canRetryVerify) && (
             <button
@@ -999,7 +974,7 @@ export function AccountFarm() {
       </>
     )
   }, [
-    activeStep, running, stats, setSettings, selected, state.settings.autoCheckBank,
+    activeStep, running, stats, selected, batchStats,
     lastPollAt, readyForVerify, hasProxy, proxyOk, pendingAccounts, bankGroups,
     selectedGroup, effectiveBatch, selectedGroupKey, holderPassword, batchAccounts,
     recreateTargets, extraBankOptions, extraBankKey, extraCount
