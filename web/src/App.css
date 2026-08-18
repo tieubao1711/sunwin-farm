@@ -1164,6 +1164,73 @@ label.full,
   color: var(--muted);
 }
 
+.farm-batch-summary {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.farm-batch-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.farm-batch-summary-head strong {
+  font-size: 14px;
+}
+
+.farm-batch-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.farm-batch-pill {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.farm-batch-pill em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--text);
+  margin-right: 4px;
+}
+
+.farm-batch-pill.ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.farm-batch-pill.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #854d0e;
+}
+
+.farm-batch-pill.info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.farm-batch-pill.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
 .workflow-stepper {
   display: flex;
   gap: 0;
@@ -1412,6 +1479,18 @@ label.full,
 
 .farm-table .data-table tr.selected {
   background: #eff6ff;
+}
+
+.farm-table .data-table tr.row-step-target:not(.selected) {
+  background: #fafcff;
+}
+
+.farm-table .data-table tr.row-done:not(.selected) {
+  opacity: 0.62;
+}
+
+.farm-table .data-table tr.row-done td {
+  background: linear-gradient(0deg, rgba(248, 250, 252, 0.65), rgba(248, 250, 252, 0.65));
 }
 
 .acc-cell {

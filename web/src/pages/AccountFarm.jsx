@@ -34,16 +34,16 @@ function suggestStep(stats) {
   if (stats.pending > 0 || stats.error > 0) return 2
   if (stats.registered > 0) return 3
   if (stats.bankPending > 0) return 4
-  if (stats.bankVerified > 0 || stats.registered > 0) return 5
-  return 1
+  if (stats.bankVerified > 0 || stats.deposited > 0) return 5
+  return 5
 }
 
 function stepCount(stepId, stats) {
   if (stepId === 1) return stats.banksTotal || 0
-  if (stepId === 2) return stats.pending + stats.error + stats.registered + stats.bankPending + stats.bankVerified + stats.deposited
-  if (stepId === 3) return stats.registered + stats.bankPending + stats.bankVerified + stats.deposited
+  if (stepId === 2) return stats.pending + stats.error
+  if (stepId === 3) return stats.registered + stats.bankPending
   if (stepId === 4) return stats.bankPending
-  if (stepId === 5) return stats.registered + stats.bankPending + stats.bankVerified + stats.deposited
+  if (stepId === 5) return stats.bankVerified + stats.deposited
   return 0
 }
 
@@ -56,6 +56,19 @@ function canRetryVerify(acc) {
   return accountHasBank(acc)
     && acc.username
     && (acc.status === 'registered' || acc.status === 'bank_pending')
+}
+
+function isCompletedAccount(acc) {
+  return acc.status === 'bank_verified' || acc.status === 'deposited'
+}
+
+function getStepAccounts(accounts, stepId) {
+  if (stepId === 1) return accounts.filter((acc) => !isCompletedAccount(acc))
+  if (stepId === 2) return accounts.filter((acc) => (acc.status === 'pending' || acc.status === 'error') && accountHasBank(acc))
+  if (stepId === 3) return accounts.filter(canRetryVerify)
+  if (stepId === 4) return accounts.filter((acc) => acc.status === 'bank_pending')
+  if (stepId === 5) return accounts.filter((acc) => acc.status === 'bank_verified' || acc.status === 'deposited')
+  return accounts
 }
 
 function matchesBankGroup(account, group) {
@@ -160,6 +173,35 @@ export function AccountFarm() {
     () => state.accounts.filter((acc) => matchesBankGroup(acc, effectiveBatch)),
     [state.accounts, effectiveBatch]
   )
+  const batchStats = useMemo(() => {
+    const next = {
+      total: batchAccounts.length,
+      pending: 0,
+      error: 0,
+      registered: 0,
+      bankPending: 0,
+      bankVerified: 0,
+      deposited: 0,
+      banksTotal: selectedGroup?.stkCount || batchAccounts.length
+    }
+    for (const acc of batchAccounts) {
+      if (acc.status === 'pending') next.pending += 1
+      else if (acc.status === 'error') next.error += 1
+      else if (acc.status === 'registered') next.registered += 1
+      else if (acc.status === 'bank_pending') next.bankPending += 1
+      else if (acc.status === 'bank_verified') next.bankVerified += 1
+      else if (acc.status === 'deposited') next.deposited += 1
+    }
+    return next
+  }, [batchAccounts, selectedGroup])
+  const stepScopedAccounts = useMemo(
+    () => getStepAccounts(batchAccounts, activeStep),
+    [batchAccounts, activeStep]
+  )
+  const stepScopedIds = useMemo(
+    () => new Set(stepScopedAccounts.map((acc) => acc.id)),
+    [stepScopedAccounts]
+  )
 
   const extraBankOptions = useMemo(() => {
     const map = new Map()
@@ -191,6 +233,18 @@ export function AccountFarm() {
       setExtraBankKey(preferred)
     }
   }, [extraBankOptions, extraBankKey, selected, batchAccounts])
+
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => batchAccounts.some((acc) => acc.id === id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [batchAccounts])
+
+  useEffect(() => {
+    if (!effectiveBatch?.bankId || !effectiveBatch?.accountHolder) return
+    setActiveStep(suggestStep(batchStats))
+  }, [effectiveBatch?.bankId, effectiveBatch?.accountHolder])
 
   function applyBatchSelection(group) {
     if (!group) {
@@ -261,7 +315,6 @@ export function AccountFarm() {
   }, [batchAccounts, selected])
 
   const readyForVerify = verifyTargets.length
-
   const checkBankForAccount = useCallback(async (account) => {
     const proxy = getProxyById(stateRef.current, account.proxyId)
     try {
@@ -660,11 +713,20 @@ export function AccountFarm() {
   }
 
   function toggleSelectAll() {
-    if (selected.size === batchAccounts.length) {
+    if (stepScopedAccounts.length === 0) {
       setSelected(new Set())
-    } else {
-      setSelected(new Set(batchAccounts.map((a) => a.id)))
+      return
     }
+    const allStepSelected = stepScopedAccounts.every((acc) => selected.has(acc.id))
+    if (allStepSelected) {
+      setSelected((prev) => new Set([...prev].filter((id) => !stepScopedIds.has(id))))
+      return
+    }
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const acc of stepScopedAccounts) next.add(acc.id)
+      return next
+    })
   }
 
   const progressPct = progress?.total
@@ -978,11 +1040,31 @@ export function AccountFarm() {
         </div>
       )}
 
+      {effectiveBatch && batchAccounts.length > 0 && (
+        <div className="farm-batch-summary">
+          <div className="farm-batch-summary-head">
+            <strong>Trạng thái batch hiện tại</strong>
+            <span className="muted">
+              {formatBankHolderLabel(effectiveBatch.bankName, effectiveBatch.bankId, effectiveBatch.accountHolder)}
+            </span>
+          </div>
+          <div className="farm-batch-pills">
+            <span className="farm-batch-pill"><em>{batchStats.total}</em> tổng</span>
+            {batchStats.pending > 0 && <span className="farm-batch-pill warn"><em>{batchStats.pending}</em> chờ đăng ký</span>}
+            {batchStats.error > 0 && <span className="farm-batch-pill danger"><em>{batchStats.error}</em> lỗi</span>}
+            {batchStats.registered > 0 && <span className="farm-batch-pill info"><em>{batchStats.registered}</em> chờ verify</span>}
+            {batchStats.bankPending > 0 && <span className="farm-batch-pill warn"><em>{batchStats.bankPending}</em> chờ duyệt bank</span>}
+            {batchStats.bankVerified > 0 && <span className="farm-batch-pill ok"><em>{batchStats.bankVerified}</em> bank OK</span>}
+            {batchStats.deposited > 0 && <span className="farm-batch-pill ok"><em>{batchStats.deposited}</em> đã có mã nạp</span>}
+          </div>
+        </div>
+      )}
+
       <nav className="workflow-stepper" aria-label="Quy trình">
         {STEPS.map((step) => {
-          const count = stepCount(step.id, stats)
+          const count = stepCount(step.id, batchStats)
           const isActive = activeStep === step.id
-          const isDone = step.id < activeStep || (step.id === 1 && stats.total > 0 && stats.registered === 0)
+          const isDone = step.id < activeStep || (step.id === 1 && batchStats.total > 0 && batchStats.registered === 0)
 
           return (
             <button
@@ -1032,9 +1114,9 @@ export function AccountFarm() {
                     <th>
                       <input
                         type="checkbox"
-                        checked={selected.size === batchAccounts.length && batchAccounts.length > 0}
+                        checked={stepScopedAccounts.length > 0 && stepScopedAccounts.every((acc) => selected.has(acc.id))}
                         onChange={toggleSelectAll}
-                        aria-label="Chọn tất cả"
+                        aria-label="Chọn tất cả theo bước"
                       />
                     </th>
                     <th>Tài khoản</th>
@@ -1048,8 +1130,13 @@ export function AccountFarm() {
                 <tbody>
                   {batchAccounts.map((acc) => {
                     const proxy = getProxyById(state, acc.proxyId)
+                    const rowClassName = [
+                      selected.has(acc.id) ? 'selected' : '',
+                      isCompletedAccount(acc) ? 'row-done' : '',
+                      stepScopedIds.has(acc.id) ? 'row-step-target' : ''
+                    ].filter(Boolean).join(' ')
                     return (
-                      <tr key={acc.id} className={selected.has(acc.id) ? 'selected' : ''}>
+                      <tr key={acc.id} className={rowClassName}>
                         <td>
                           <input type="checkbox" checked={selected.has(acc.id)} onChange={() => toggleSelect(acc.id)} />
                         </td>
