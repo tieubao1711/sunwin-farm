@@ -1,0 +1,24 @@
+{
+  "name": "sunwin-api-kit",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "test:login": "node examples/full-info.js",
+    "test:change-password": "node examples/change-password.js",
+    "server": "node scripts/start-server.js",
+    "web:dev": "npm run dev --prefix web",
+    "dev": "concurrently -n api,web -c blue,green \"npm run server\" \"npm run web:dev\""
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "concurrently": "^10.0.3",
+    "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "https-proxy-agent": "^7.0.6",
+    "mongoose": "^9.9.3",
+    "ws": "^8.18.0"
+  }
+}
