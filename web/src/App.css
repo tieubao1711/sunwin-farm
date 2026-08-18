@@ -1709,6 +1709,17 @@ label.full,
   line-height: 1.2;
 }
 
+.extra-acc-box {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.extra-acc-box h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;

@@ -59,6 +59,20 @@ export function createAccountsFromBankHolder(payload) {
   })
 }
 
+export function recreateAccounts(ids) {
+  return farmFetch('/accounts/recreate', {
+    method: 'POST',
+    body: JSON.stringify({ ids })
+  })
+}
+
+export function createExtraAccounts(payload) {
+  return farmFetch('/accounts/extra-with-bank', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
 export function fetchBankSelectGroups() {
   return farmFetch('/banks/select-groups').then((res) => res.data)
 }

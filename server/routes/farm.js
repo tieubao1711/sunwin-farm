@@ -202,6 +202,83 @@ router.post('/accounts', async (req, res) => {
   }
 })
 
+router.post('/accounts/extra-with-bank', async (req, res) => {
+  try {
+    const employee = getEmployee(req)
+    const settingsDoc = await getSettings()
+    const password = req.body.password || settingsDoc.defaultPassword || 'abc123'
+    const count = Math.min(20, Math.max(1, Number(req.body.count) || 1))
+
+    let bank = {
+      bankId: req.body.bankId || '',
+      bankName: req.body.bankName || '',
+      accountHolder: (req.body.accountHolder || '').trim(),
+      accountNo: (req.body.accountNo || '').trim(),
+      bankRecordId: req.body.bankRecordId || null
+    }
+
+    if (req.body.sourceAccountId) {
+      const source = await GameAccount.findById(req.body.sourceAccountId)
+      if (!source) {
+        return res.status(404).json({ success: false, message: 'Không tìm thấy acc nguồn để copy bank' })
+      }
+      bank = {
+        bankId: source.bankId,
+        bankName: source.bankName,
+        accountHolder: source.accountHolder,
+        accountNo: source.accountNo,
+        bankRecordId: source.bankRecordId
+      }
+    }
+
+    if (!bank.accountHolder || !bank.accountNo) {
+      return res.status(400).json({ success: false, message: 'Thiếu chủ khoản hoặc STK để trùng bank' })
+    }
+
+    const existingUsernames = new Set(
+      (await GameAccount.find({}, 'username')).map((doc) => doc.username.toLowerCase())
+    )
+
+    const created = []
+    for (let i = 0; i < count; i += 1) {
+      const username = generateUsername(existingUsernames)
+      existingUsernames.add(username.toLowerCase())
+      const doc = await GameAccount.create({
+        accountHolder: bank.accountHolder,
+        holderPassword: password,
+        password,
+        bankId: bank.bankId,
+        bankName: bank.bankName,
+        accountNo: bank.accountNo,
+        bankRecordId: bank.bankRecordId,
+        username,
+        displayName: `${username}d`,
+        status: 'pending',
+        usageStatus: 'unused',
+        assignedTo: employee,
+        note: `acc thêm · trùng STK ${bank.accountNo}`,
+        updatedBy: employee
+      })
+      created.push(mapAccount(doc))
+    }
+
+    await logActivity(
+      employee,
+      'extra_accounts',
+      'account',
+      '',
+      `${created.length} acc random trùng STK ${bank.accountNo}`
+    )
+
+    res.json({
+      success: true,
+      data: { created: created.length, accounts: created }
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message })
+  }
+})
+
 router.post('/accounts/from-bank-holder', async (req, res) => {
   try {
     const employee = getEmployee(req)
@@ -282,6 +359,81 @@ router.post('/accounts/from-bank-holder', async (req, res) => {
     res.json({
       success: true,
       data: { created: created.length, skipped, accounts: created }
+    })
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message })
+  }
+})
+
+router.post('/accounts/recreate', async (req, res) => {
+  try {
+    const employee = getEmployee(req)
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(Boolean) : []
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'Chưa chọn account' })
+    }
+
+    const existingUsernames = new Set(
+      (await GameAccount.find({}, 'username')).map((doc) => doc.username.toLowerCase())
+    )
+
+    const recreated = []
+    const skipped = []
+
+    for (const id of ids) {
+      const account = await GameAccount.findById(id)
+      if (!account) {
+        skipped.push({ id, reason: 'not_found' })
+        continue
+      }
+      if (account.status === 'bank_verified') {
+        skipped.push({ id, username: account.username, reason: 'bank_ok' })
+        continue
+      }
+
+      const oldUsername = account.username
+      const username = generateUsername(existingUsernames)
+      existingUsernames.add(username.toLowerCase())
+
+      const doc = await GameAccount.findByIdAndUpdate(id, {
+        username,
+        displayName: `${username}d`,
+        status: 'pending',
+        usageStatus: 'unused',
+        proxyId: null,
+        lastError: '',
+        depositInfo: null,
+        verifiedBankAccounts: [],
+        verifiedAccountHolder: [],
+        note: [account.note, `recreate từ ${oldUsername}`].filter(Boolean).join(' · '),
+        updatedBy: employee
+      }, { new: true })
+
+      if (account.bankRecordId) {
+        await BankRecord.findByIdAndUpdate(account.bankRecordId, {
+          username,
+          usageStatus: 'reserved',
+          reservedBy: employee,
+          reservedAt: new Date(),
+          gameAccountId: account._id,
+          updatedBy: employee
+        })
+      }
+
+      recreated.push(mapAccount(doc))
+    }
+
+    await logActivity(
+      employee,
+      'recreate_accounts',
+      'account',
+      '',
+      `${recreated.length} acc mới từ STK cũ`
+    )
+
+    res.json({
+      success: true,
+      data: { created: recreated.length, skipped, accounts: recreated }
     })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })

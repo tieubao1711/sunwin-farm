@@ -52,6 +52,12 @@ function canDepositAccount(acc) {
     && acc.username && acc.password
 }
 
+function canRetryVerify(acc) {
+  return accountHasBank(acc)
+    && acc.username
+    && (acc.status === 'registered' || acc.status === 'bank_pending')
+}
+
 function matchesBankGroup(account, group) {
   if (!group?.bankId || !group?.accountHolder) return false
   return account.bankId === group.bankId
@@ -102,7 +108,9 @@ export function AccountFarm() {
     deleteAccount,
     refresh,
     fetchBankSelectGroups,
-    createAccountsFromBankHolder
+    createAccountsFromBankHolder,
+    recreateAccounts,
+    createExtraAccounts
   } = useFarm()
   const stateRef = useRef(state)
   stateRef.current = state
@@ -123,6 +131,8 @@ export function AccountFarm() {
   const [inspectModal, setInspectModal] = useState(null)
   const [walletLoading, setWalletLoading] = useState(() => new Set())
   const [lastPollAt, setLastPollAt] = useState(null)
+  const [extraCount, setExtraCount] = useState(1)
+  const [extraBankKey, setExtraBankKey] = useState('')
 
   const batchNum = Number(state.settings.batchSize) || 100
   const hasProxy = stats.proxiesTotal > 0
@@ -150,6 +160,37 @@ export function AccountFarm() {
     () => state.accounts.filter((acc) => matchesBankGroup(acc, effectiveBatch)),
     [state.accounts, effectiveBatch]
   )
+
+  const extraBankOptions = useMemo(() => {
+    const map = new Map()
+    for (const acc of batchAccounts) {
+      if (!acc.accountNo) continue
+      const key = `${acc.bankId}|${acc.accountNo}`
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          bankId: acc.bankId,
+          bankName: acc.bankName,
+          accountHolder: acc.accountHolder,
+          accountNo: acc.accountNo,
+          bankRecordId: acc.bankRecordId,
+          sourceAccountId: acc.id
+        })
+      }
+    }
+    return [...map.values()]
+  }, [batchAccounts])
+
+  useEffect(() => {
+    if (extraBankOptions.length === 0) return
+    const selectedAcc = batchAccounts.find((acc) => selected.has(acc.id) && acc.accountNo)
+    const preferred = selectedAcc
+      ? `${selectedAcc.bankId}|${selectedAcc.accountNo}`
+      : extraBankOptions[0].key
+    if (!extraBankKey || !extraBankOptions.some((opt) => opt.key === extraBankKey)) {
+      setExtraBankKey(preferred)
+    }
+  }, [extraBankOptions, extraBankKey, selected, batchAccounts])
 
   function applyBatchSelection(group) {
     if (!group) {
@@ -211,15 +252,15 @@ export function AccountFarm() {
   const pendingAccounts = batchAccounts.filter(
     (a) => (a.status === 'pending' || a.status === 'error') && accountHasBank(a)
   )
-  const registeredAccounts = batchAccounts.filter((a) => a.status === 'registered')
   const verifyTargets = useMemo(() => {
+    const retryable = batchAccounts.filter(canRetryVerify)
     if (selected.size > 0) {
-      return batchAccounts.filter((a) => selected.has(a.id) && a.status === 'registered')
+      return retryable.filter((a) => selected.has(a.id))
     }
-    return registeredAccounts
-  }, [batchAccounts, selected, registeredAccounts])
+    return retryable
+  }, [batchAccounts, selected])
 
-  const readyForVerify = verifyTargets.filter(accountHasBank).length
+  const readyForVerify = verifyTargets.length
 
   const checkBankForAccount = useCallback(async (account) => {
     const proxy = getProxyById(stateRef.current, account.proxyId)
@@ -276,6 +317,63 @@ export function AccountFarm() {
     const timer = setInterval(tick, POLL_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [state.settings.autoCheckBank, checkBankForAccount])
+
+  const recreateTargets = useMemo(() => {
+    const pool = selected.size > 0
+      ? batchAccounts.filter((a) => selected.has(a.id))
+      : batchAccounts.filter((a) => a.lastError && a.status !== 'bank_verified')
+    return pool.filter((a) => a.status !== 'bank_verified')
+  }, [batchAccounts, selected])
+
+  async function handleRecreateSelected() {
+    const ids = recreateTargets.map((a) => a.id)
+    if (ids.length === 0) return
+
+    setRunning(true)
+    setProgress({ label: `Đang tạo ${ids.length} username mới (giữ STK)...` })
+    try {
+      const result = await recreateAccounts(ids)
+      const skipped = result.skipped?.length || 0
+      setSelected(new Set())
+      setProgress({
+        label: `Đã tạo lại ${result.created} acc${skipped ? ` · ${skipped} bỏ qua (Bank OK)` : ''} — đăng ký lại ở bước 2`
+      })
+      if (result.created > 0) setActiveStep(2)
+    } catch (err) {
+      setProgress({ label: err.message })
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  async function handleAddExtraAccounts() {
+    const option = extraBankOptions.find((item) => item.key === extraBankKey) || extraBankOptions[0]
+    if (!option) {
+      setProgress({ label: 'Chọn STK để trùng bank' })
+      return
+    }
+
+    setRunning(true)
+    setProgress({ label: `Đang tạo ${extraCount} acc random trùng STK ${option.accountNo}...` })
+    try {
+      const result = await createExtraAccounts({
+        count: Number(extraCount) || 1,
+        password: holderPassword,
+        sourceAccountId: option.sourceAccountId,
+        bankId: option.bankId,
+        bankName: option.bankName,
+        accountHolder: option.accountHolder,
+        accountNo: option.accountNo,
+        bankRecordId: option.bankRecordId
+      })
+      setProgress({ label: `Đã thêm ${result.created} acc mới · username random · trùng bank ${option.accountNo}` })
+      if (result.created > 0) setActiveStep(2)
+    } catch (err) {
+      setProgress({ label: err.message })
+    } finally {
+      setRunning(false)
+    }
+  }
 
   async function handleCreateFromBank() {
     const group = selectedGroup || effectiveBatch
@@ -399,43 +497,75 @@ export function AccountFarm() {
     })
   }
 
+  async function verifyOneAccount(account) {
+    const proxy = getProxyById(stateRef.current, account.proxyId)
+    const result = await callApi('verify-bank-account', {
+      username: account.username,
+      password: account.password || account.holderPassword,
+      proxyUrl: proxy?.raw,
+      bankId: account.bankId || DEFAULT_BANK_ID,
+      accountHolder: account.accountHolder,
+      accountNo: account.accountNo
+    })
+
+    if (result?.success === false) {
+      const message = result.message || result.data?.message || result.data?.data?.message || 'Verify bank thất bại'
+      throw new Error(message)
+    }
+
+    await patchAccount(account.id, {
+      status: 'bank_pending',
+      lastError: ''
+    })
+  }
+
   async function handleVerifySelected() {
-    const targets = verifyTargets.filter(accountHasBank)
+    const targets = verifyTargets.filter(canRetryVerify)
     if (targets.length === 0) return
 
     setRunning(true)
     setProgress({ current: 0, total: targets.length, label: 'Đang gửi verify bank...' })
 
+    let ok = 0
+    let fail = 0
+
     for (let i = 0; i < targets.length; i += 1) {
       const account = targets[i]
-      const proxy = getProxyById(stateRef.current, account.proxyId)
-
       setProgress({ current: i + 1, total: targets.length, label: `Verify: ${account.username}` })
 
       try {
-        await callApi('verify-bank-account', {
-          username: account.username,
-          password: account.password || account.holderPassword,
-          proxyUrl: proxy?.raw,
-          bankId: account.bankId || DEFAULT_BANK_ID,
-          accountHolder: account.accountHolder,
-          accountNo: account.accountNo
-        })
-        await patchAccount(account.id, {
-          status: 'bank_pending',
-          usageStatus: 'used',
-          lastError: ''
-        })
+        await verifyOneAccount(account)
+        ok += 1
       } catch (err) {
+        fail += 1
         await patchAccount(account.id, { lastError: err.message })
       }
     }
 
     await refresh()
 
-    setProgress({ current: targets.length, total: targets.length, label: `Đã gửi verify — lỗi API ghi ở cột acc, không dừng batch` })
+    setProgress({
+      current: targets.length,
+      total: targets.length,
+      label: `Verify xong — ${ok} gửi được · ${fail} lỗi (bấm Gửi lại hoặc Verify lại từng dòng)`
+    })
     setRunning(false)
-    setActiveStep(4)
+    if (ok > 0) setActiveStep(4)
+  }
+
+  async function handleRetryVerify(account) {
+    if (running || !canRetryVerify(account)) return
+    setRunning(true)
+    setProgress({ label: `Verify lại: ${account.username}` })
+    try {
+      await verifyOneAccount(account)
+      setProgress({ label: `Đã gửi lại verify: ${account.username}` })
+    } catch (err) {
+      await patchAccount(account.id, { lastError: err.message })
+      setProgress({ label: `Verify lỗi: ${err.message}` })
+    } finally {
+      setRunning(false)
+    }
   }
 
   async function handleManualCheckAll() {
@@ -539,6 +669,49 @@ export function AccountFarm() {
     : null
 
   const stepPanel = useMemo(() => {
+    const extraPanel = extraBankOptions.length > 0 ? (
+      <div className="extra-acc-box">
+        <h4>Thêm acc mới</h4>
+        <p className="step-desc">
+          Acc mãi không verify được → tạo username random, <strong>được trùng STK</strong> đang dùng.
+        </p>
+        <div className="form-stack">
+          <label>
+            Chọn bank / STK (cho phép trùng)
+            <select
+              className="control-select"
+              value={extraBankKey}
+              onChange={(e) => setExtraBankKey(e.target.value)}
+            >
+              {extraBankOptions.map((opt) => (
+                <option key={opt.key} value={opt.key}>
+                  {formatBankHolderLabel(opt.bankName, opt.bankId, opt.accountHolder)} · {opt.accountNo}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Số acc thêm
+            <input
+              type="number"
+              min="1"
+              max="20"
+              value={extraCount}
+              onChange={(e) => setExtraCount(Math.max(1, Number(e.target.value) || 1))}
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          className="btn primary block"
+          disabled={running}
+          onClick={handleAddExtraAccounts}
+        >
+          {running ? 'Đang tạo...' : `Thêm ${extraCount} acc random (trùng bank)`}
+        </button>
+      </div>
+    ) : null
+
     if (activeStep === 1) {
       return (
         <>
@@ -605,6 +778,17 @@ export function AccountFarm() {
           >
             {running ? 'Đang tạo...' : `Tạo ${selectedGroup?.stkCount || batchAccounts.length || 0} account`}
           </button>
+          {recreateTargets.length > 0 && (
+            <button
+              type="button"
+              className="btn block"
+              disabled={running}
+              onClick={handleRecreateSelected}
+            >
+              Tạo acc mới từ {recreateTargets.length} dòng chọn / lỗi (đổi username, giữ STK)
+            </button>
+          )}
+          {extraPanel}
         </>
       )
     }
@@ -634,6 +818,17 @@ export function AccountFarm() {
           >
             {running ? 'Đang đăng ký...' : `Đăng ký ${queueSize} account`}
           </button>
+          {recreateTargets.length > 0 && (
+            <button
+              type="button"
+              className="btn block"
+              disabled={running}
+              onClick={handleRecreateSelected}
+            >
+              Acc không verify được → tạo username mới ({recreateTargets.length})
+            </button>
+          )}
+          {extraPanel}
         </>
       )
     }
@@ -643,10 +838,11 @@ export function AccountFarm() {
         <>
           <h3>Verify bank</h3>
           <p className="step-desc">
-            Gửi verify STK đã gắn. Lỗi API không dừng batch — xem cột lỗi và chạy lại sau.
+            Gửi verify STK đã gắn. Acc lỗi API vẫn nằm trong hàng — bấm Gửi lại hoặc Verify lại từng dòng.
           </p>
           <div className={`step-alert ${readyForVerify > 0 ? 'ok' : 'warn'}`}>
-            {readyForVerify} account sẵn sàng verify
+            {readyForVerify} account chờ gửi / gửi lại
+            {selected.size > 0 ? ' (theo dòng đã chọn)' : ' (registered + chờ verify)'}
           </div>
           <button
             type="button"
@@ -654,8 +850,19 @@ export function AccountFarm() {
             disabled={running || readyForVerify === 0}
             onClick={handleVerifySelected}
           >
-            {running ? 'Đang gửi...' : `Gửi verify (${readyForVerify})`}
+            {running ? 'Đang gửi...' : `Gửi / gửi lại verify (${readyForVerify})`}
           </button>
+          {recreateTargets.length > 0 && (
+            <button
+              type="button"
+              className="btn block"
+              disabled={running}
+              onClick={handleRecreateSelected}
+            >
+              Tạo acc mới từ dòng chọn / lỗi ({recreateTargets.length})
+            </button>
+          )}
+          {extraPanel}
         </>
       )
     }
@@ -682,9 +889,23 @@ export function AccountFarm() {
           <button type="button" className="btn block" disabled={running || stats.bankPending === 0} onClick={handleManualCheckAll}>
             Kiểm tra ngay
           </button>
+          {batchAccounts.some(canRetryVerify) && (
+            <button
+              type="button"
+              className="btn block"
+              disabled={running || readyForVerify === 0}
+              onClick={() => {
+                setActiveStep(3)
+                handleVerifySelected()
+              }}
+            >
+              Gửi lại verify ({readyForVerify})
+            </button>
+          )}
           <button type="button" className="btn primary block" onClick={() => setActiveStep(5)}>
             Nạp tiền (không cần bank OK) →
           </button>
+          {extraPanel}
         </>
       )
     }
@@ -708,7 +929,8 @@ export function AccountFarm() {
   }, [
     activeStep, running, stats, setSettings, selected, state.settings.autoCheckBank,
     lastPollAt, readyForVerify, hasProxy, proxyOk, pendingAccounts, bankGroups,
-    selectedGroup, effectiveBatch, selectedGroupKey, holderPassword, batchAccounts
+    selectedGroup, effectiveBatch, selectedGroupKey, holderPassword, batchAccounts,
+    recreateTargets, extraBankOptions, extraBankKey, extraCount
   ])
 
   return (
@@ -851,13 +1073,23 @@ export function AccountFarm() {
                             account={acc}
                             onOpenInspect={(tab) => openInspect(acc, tab)}
                           />
-                          {(acc.status === 'registered' || acc.status === 'error') && (
+                          {(acc.status === 'registered' || acc.status === 'error' || acc.status === 'bank_pending') && (
                             <button
                               type="button"
                               className="btn sm"
                               onClick={() => openBankModal(acc)}
                             >
                               Sửa bank
+                            </button>
+                          )}
+                          {canRetryVerify(acc) && (
+                            <button
+                              type="button"
+                              className="btn sm"
+                              disabled={running}
+                              onClick={() => handleRetryVerify(acc)}
+                            >
+                              Verify lại
                             </button>
                           )}
                           {canDepositAccount(acc) && (

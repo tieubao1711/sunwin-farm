@@ -97,6 +97,18 @@ export function FarmProvider({ children }) {
       return result.data
     },
 
+    recreateAccounts: async (ids) => {
+      const result = await farmApi.recreateAccounts(ids)
+      await refresh()
+      return result.data
+    },
+
+    createExtraAccounts: async (payload) => {
+      const result = await farmApi.createExtraAccounts(payload)
+      await refresh()
+      return result.data
+    },
+
     fetchBankSelectGroups: farmApi.fetchBankSelectGroups,
 
     patchAccount: async (accountId, patch) => {

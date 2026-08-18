@@ -146,6 +146,7 @@ export function AccountList() {
   const [pageSize, setPageSize] = useState(25)
   const [inspectModal, setInspectModal] = useState(null)
   const [walletLoading, setWalletLoading] = useState(() => new Set())
+  const [selected, setSelected] = useState(() => new Set())
 
   function openInspect(account, tab) {
     setInspectModal({ account, tab })
@@ -360,6 +361,26 @@ export function AccountList() {
     await load()
   }
 
+  function toggleSelect(id) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function bulkUsage(status) {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    for (const id of ids) {
+      await patchAccount(id, { usageStatus: status })
+    }
+    setSelected(new Set())
+    setMessage(status === 'unused' ? `Đã bỏ tick ${ids.length} acc` : `Đã đánh dấu ${ids.length} acc đã dùng`)
+    await load()
+  }
+
   async function handleDelete(id) {
     await deleteAccount(id)
     await load()
@@ -389,13 +410,31 @@ export function AccountList() {
             <span className="mini-stat"><strong>{accountCount}</strong> account</span>
             <span className="mini-stat ok">Chưa dùng <strong>{stats.accountUnused ?? 0}</strong></span>
             <span className="mini-stat warn">Đã dùng <strong>{stats.accountUsed ?? 0}</strong></span>
+            {selected.size > 0 && (
+              <span className="mini-stat">{selected.size} đang chọn</span>
+            )}
           </div>
-          {viewMode === 'group' && (
-            <div className="account-controls-quick">
-              <button type="button" className="btn sm" onClick={expandAll}>Mở tất cả</button>
-              <button type="button" className="btn sm ghost" onClick={collapseAll}>Thu gọn</button>
-            </div>
-          )}
+          <div className="account-controls-quick">
+            {viewMode === 'group' && (
+              <>
+                <button type="button" className="btn sm" onClick={expandAll}>Mở tất cả</button>
+                <button type="button" className="btn sm ghost" onClick={collapseAll}>Thu gọn</button>
+              </>
+            )}
+            {selected.size > 0 && (
+              <>
+                <button type="button" className="btn sm ghost" onClick={() => bulkUsage('unused')}>
+                  Bỏ tick đã dùng ({selected.size})
+                </button>
+                <button type="button" className="btn sm" onClick={() => bulkUsage('used')}>
+                  Đánh dấu đã dùng ({selected.size})
+                </button>
+                <button type="button" className="btn sm ghost" onClick={() => setSelected(new Set())}>
+                  Bỏ chọn
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="account-controls-search">
@@ -493,6 +532,24 @@ export function AccountList() {
                   <table className="data-table">
                     <thead>
                       <tr>
+                        <th>
+                          <input
+                            type="checkbox"
+                            checked={group.rows.length > 0 && group.rows.every((row) => selected.has(row.id))}
+                            onChange={() => {
+                              setSelected((prev) => {
+                                const next = new Set(prev)
+                                const allOn = group.rows.every((row) => next.has(row.id))
+                                group.rows.forEach((row) => {
+                                  if (allOn) next.delete(row.id)
+                                  else next.add(row.id)
+                                })
+                                return next
+                              })
+                            }}
+                            aria-label="Chọn nhóm"
+                          />
+                        </th>
                         <th>Username</th>
                         <th>Số TK</th>
                         <th>Số dư</th>
@@ -505,6 +562,13 @@ export function AccountList() {
                     <tbody>
                       {group.rows.map((row) => (
                         <tr key={row.id} className={row.usageStatus === 'used' ? 'is-used' : ''}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(row.id)}
+                              onChange={() => toggleSelect(row.id)}
+                            />
+                          </td>
                           <td><span className="mono">{row.username}</span></td>
                           <td><span className="mono">{row.accountNo}</span></td>
                           <WalletCell
@@ -539,6 +603,24 @@ export function AccountList() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      checked={pagedRows.length > 0 && pagedRows.every((row) => selected.has(row.id))}
+                      onChange={() => {
+                        setSelected((prev) => {
+                          const next = new Set(prev)
+                          const allOn = pagedRows.every((row) => next.has(row.id))
+                          pagedRows.forEach((row) => {
+                            if (allOn) next.delete(row.id)
+                            else next.add(row.id)
+                          })
+                          return next
+                        })
+                      }}
+                      aria-label="Chọn trang"
+                    />
+                  </th>
                   <th>Ngân hàng · Chủ khoản</th>
                   <th>Username</th>
                   <th>Số TK</th>
@@ -553,6 +635,13 @@ export function AccountList() {
               <tbody>
                 {pagedRows.map((row) => (
                   <tr key={row.id} className={row.usageStatus === 'used' ? 'is-used' : ''}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(row.id)}
+                        onChange={() => toggleSelect(row.id)}
+                      />
+                    </td>
                     <td>{row.groupLabel}</td>
                     <td><span className="mono">{row.username}</span></td>
                     <td><span className="mono">{row.accountNo}</span></td>
