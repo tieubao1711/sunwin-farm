@@ -1,3 +1,4 @@
+require('./crypto-polyfill')
 require('dotenv').config()
 
 const path = require('path');

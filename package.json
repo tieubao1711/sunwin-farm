@@ -2,6 +2,9 @@
   "name": "sunwin-api-kit",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "main": "src/index.js",
   "scripts": {
     "test:login": "node examples/full-info.js",
