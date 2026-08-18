@@ -8,7 +8,7 @@
     "test:change-password": "node examples/change-password.js",
     "server": "node scripts/start-server.js",
     "start": "node server/index.js",
-    "build": "npm run build --prefix web",
+    "build": "npm install --prefix web --include=dev && npm run build --prefix web",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:reload": "pm2 reload ecosystem.config.js",
     "pm2:stop": "pm2 stop sunwin-farm",

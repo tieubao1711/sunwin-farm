@@ -1,6 +1,6 @@
 const { execSync } = require('child_process');
 
-const port = Number(process.argv[2] || 3001);
+const port = Number(process.argv[2] || 5610);
 const isWin = process.platform === 'win32';
 
 function killPort(targetPort) {

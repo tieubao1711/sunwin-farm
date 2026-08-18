@@ -10,7 +10,7 @@ const { connectDb, isDbReady } = require('./db');
 const farmRoutes = require('./routes/farm');
 
 const app = express();
-const PORT = Number(process.env.API_PORT || 3001);
+const PORT = Number(process.env.API_PORT || 5610);
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));

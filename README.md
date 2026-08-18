@@ -145,7 +145,7 @@ npm run dev
 ```
 
 - Frontend: `http://localhost:5173`
-- API server: `http://localhost:3001`
+- API server: `http://localhost:5610`
 
 Frontend proxy `/api/*` sang server Node, server goi `SunwinClient` trong `src/`.
 
