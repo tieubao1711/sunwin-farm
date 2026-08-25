@@ -6,7 +6,8 @@ const DEFAULT_STATE = {
   settings: {
     autoCheckBank: false,
     defaultPassword: 'abc123',
-    depositAmount: 100000
+    depositAmount: 100000,
+    defaultProxyId: null
   }
 }
 
@@ -149,12 +150,18 @@ export function removeProxy(state, proxyId) {
   }
 }
 
-/** Chọn gateway xoay — ưu tiên gateway ít account nhất */
+/** Chọn gateway xoay — ưu tiên gateway mặc định, rồi gateway ít account nhất */
 export function pickProxy(state) {
   if (!state.proxies.length) return null
 
   const candidates = state.proxies.filter((proxy) => getProxyRemainingSlots(state, proxy) > 0)
   if (!candidates.length) return null
+
+  const defaultId = state.settings?.defaultProxyId
+  if (defaultId) {
+    const preferred = candidates.find((proxy) => proxy.id === defaultId)
+    if (preferred) return preferred
+  }
 
   return candidates.reduce((best, proxy) => {
     const usage = countProxyUsage(state, proxy.id)

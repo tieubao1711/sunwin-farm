@@ -8,7 +8,8 @@ const EMPTY_STATE = {
   settings: {
     autoCheckBank: false,
     defaultPassword: 'abc123',
-    depositAmount: 100000
+    depositAmount: 100000,
+    defaultProxyId: null
   },
   stats: {
     total: 0,

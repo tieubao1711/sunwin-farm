@@ -4,9 +4,10 @@ import { useFarm } from '../farm/FarmProvider'
 import { countProxyUsage, isProxyUnlimited, maskProxy } from '../farm/store'
 
 export function ProxyManager() {
-  const { state, stats, importProxies, deleteProxy, patchProxy, refresh } = useFarm()
+  const { state, stats, importProxies, deleteProxy, patchProxy, setSettings, refresh } = useFarm()
   const [text, setText] = useState('')
   const [message, setMessage] = useState('')
+  const [savingDefault, setSavingDefault] = useState(false)
 
   const usageMap = useMemo(() => {
     const map = new Map()
@@ -17,6 +18,8 @@ export function ProxyManager() {
   }, [state])
 
   const hasLegacyCap = state.proxies.some((p) => !isProxyUnlimited(p) && (p.maxSlots ?? 0) > 0)
+  const defaultProxyId = state.settings?.defaultProxyId || null
+  const defaultProxy = state.proxies.find((proxy) => proxy.id === defaultProxyId) || null
 
   async function handleImport() {
     try {
@@ -42,6 +45,18 @@ export function ProxyManager() {
     }
   }
 
+  async function setDefaultProxy(proxyId) {
+    setSavingDefault(true)
+    try {
+      await setSettings({ defaultProxyId: proxyId || null })
+      setMessage(proxyId ? 'Đã đặt gateway mặc định' : 'Đã bỏ gateway mặc định')
+    } catch (err) {
+      setMessage(err.message)
+    } finally {
+      setSavingDefault(false)
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-head">
@@ -52,6 +67,11 @@ export function ProxyManager() {
         <div className="stat-pills">
           <span className="pill">{stats.proxiesTotal} gateway</span>
           <span className="pill ok">{stats.proxyAccountsBound ?? 0} account đang dùng</span>
+          {defaultProxy ? (
+            <span className="pill ok">Mặc định: {maskProxy(defaultProxy.raw)}</span>
+          ) : (
+            <span className="pill">Chưa chọn mặc định</span>
+          )}
           {stats.proxyUnlimited ? (
             <span className="pill ok">Không giới hạn</span>
           ) : (
@@ -63,7 +83,7 @@ export function ProxyManager() {
       <section className="panel info-box">
         Mỗi dòng là 1 <strong>gateway xoay</strong> (vd: DataImpulse). Gateway tự đổi IP khoảng{' '}
         <strong>30 phút</strong> — nhiều account có thể dùng chung 1 gateway, mỗi lần gọi API ra IP khác nhau.
-        {' '}Giới hạn slot chỉ dùng khi bạn <em>chủ động đặt</em> (mặc định = không giới hạn).
+        {' '}Chọn <strong>1 gateway mặc định</strong> để đăng ký mới ưu tiên dùng gateway đó (khi gateway hết tiền thì đổi mặc định sang gateway khác).
       </section>
 
       {hasLegacyCap && (
@@ -95,7 +115,19 @@ export function ProxyManager() {
       </section>
 
       <section className="panel">
-        <h2>Danh sách gateway ({state.proxies.length})</h2>
+        <div className="panel-head-row">
+          <h2>Danh sách gateway ({state.proxies.length})</h2>
+          {defaultProxyId && (
+            <button
+              type="button"
+              className="btn ghost sm"
+              disabled={savingDefault}
+              onClick={() => setDefaultProxy(null)}
+            >
+              Bỏ mặc định
+            </button>
+          )}
+        </div>
         {state.proxies.length === 0 ? (
           <p className="muted">Chưa có proxy. Dán gateway xoay phía trên.</p>
         ) : (
@@ -103,6 +135,7 @@ export function ProxyManager() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th>Mặc định</th>
                   <th>Gateway</th>
                   <th>Loại</th>
                   <th>Account đang dùng</th>
@@ -116,9 +149,22 @@ export function ProxyManager() {
                   const unlimited = isProxyUnlimited(proxy)
                   const max = proxy.maxSlots ?? DEFAULT_ROTATING_SLOTS
                   const pct = !unlimited && max > 0 ? Math.round((usage / max) * 100) : 0
+                  const isDefault = defaultProxyId === proxy.id
 
                   return (
-                    <tr key={proxy.id}>
+                    <tr key={proxy.id} className={isDefault ? 'selected' : ''}>
+                      <td>
+                        <label className="default-proxy-radio">
+                          <input
+                            type="radio"
+                            name="default-proxy"
+                            checked={isDefault}
+                            disabled={savingDefault}
+                            onChange={() => setDefaultProxy(proxy.id)}
+                          />
+                          <span>{isDefault ? 'Đang dùng' : 'Chọn'}</span>
+                        </label>
+                      </td>
                       <td><code>{maskProxy(proxy.raw)}</code></td>
                       <td><span className="tag ok">Xoay · 30p</span></td>
                       <td>

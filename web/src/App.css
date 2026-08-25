@@ -1545,6 +1545,26 @@ label.full,
   font-size: 11px;
 }
 
+.default-proxy-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.default-proxy-radio input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.default-proxy-radio:has(input:checked) {
+  color: #166534;
+}
+
 .bank-cell strong {
   display: block;
   font-size: 12px;

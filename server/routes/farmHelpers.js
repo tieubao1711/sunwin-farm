@@ -63,11 +63,16 @@ function getProxyRemainingSlots(accounts, proxy) {
   return Math.max(0, (proxy.maxSlots || 0) - usage)
 }
 
-function pickProxy(proxies, accounts) {
+function pickProxy(proxies, accounts, defaultProxyId = null) {
   if (!proxies.length) return null
 
   const candidates = proxies.filter((proxy) => getProxyRemainingSlots(accounts, proxy) > 0)
   if (!candidates.length) return null
+
+  if (defaultProxyId) {
+    const preferred = candidates.find((proxy) => String(proxy._id) === String(defaultProxyId))
+    if (preferred) return preferred
+  }
 
   return candidates.reduce((best, proxy) => {
     const usage = countProxyUsage(accounts, proxy._id)

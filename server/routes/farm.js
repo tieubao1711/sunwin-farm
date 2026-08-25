@@ -102,7 +102,8 @@ async function loadFarmState() {
     settings: {
       autoCheckBank: settingsDoc.autoCheckBank,
       defaultPassword: settingsDoc.defaultPassword,
-      depositAmount: settingsDoc.depositAmount
+      depositAmount: settingsDoc.depositAmount,
+      defaultProxyId: settingsDoc.defaultProxyId || null
     },
     stats: {
       ...getAccountStats(accounts, proxies),
@@ -129,10 +130,27 @@ router.patch('/settings', async (req, res) => {
   try {
     const employee = getEmployee(req)
     const settingsDoc = await getSettings()
-    Object.assign(settingsDoc, req.body || {})
+    const body = req.body || {}
+    const allowed = ['autoCheckBank', 'defaultPassword', 'depositAmount', 'defaultProxyId', 'batchSize']
+    for (const key of allowed) {
+      if (!Object.prototype.hasOwnProperty.call(body, key)) continue
+      if (key === 'defaultProxyId') {
+        settingsDoc.defaultProxyId = body.defaultProxyId || null
+      } else {
+        settingsDoc[key] = body[key]
+      }
+    }
     await settingsDoc.save()
-    await logActivity(employee, 'update_settings', 'settings', settingsDoc._id, JSON.stringify(req.body))
-    res.json({ success: true, data: settingsDoc })
+    await logActivity(employee, 'update_settings', 'settings', settingsDoc._id, JSON.stringify(body))
+    res.json({
+      success: true,
+      data: {
+        autoCheckBank: settingsDoc.autoCheckBank,
+        defaultPassword: settingsDoc.defaultPassword,
+        depositAmount: settingsDoc.depositAmount,
+        defaultProxyId: settingsDoc.defaultProxyId || null
+      }
+    })
   } catch (err) {
     res.status(500).json({ success: false, message: err.message })
   }
@@ -184,6 +202,11 @@ router.delete('/proxies/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: `Proxy đang phục vụ ${usage} tài khoản` })
     }
     await ProxyGateway.findByIdAndDelete(req.params.id)
+    const settingsDoc = await getSettings()
+    if (settingsDoc.defaultProxyId === req.params.id) {
+      settingsDoc.defaultProxyId = null
+      await settingsDoc.save()
+    }
     await logActivity(getEmployee(req), 'delete_proxy', 'proxy', req.params.id)
     res.json({ success: true })
   } catch (err) {
